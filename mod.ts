@@ -11,7 +11,7 @@ const API_KEYS: string[] = KEY_ENV.startsWith('[')
 			.filter(k => k);
 
 // Base URL for the Google Gemini API (adjust if needed)
-const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta2';
+const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const API_BASE_URL = Deno.env.get('GEMINI_API_BASE_URL') || DEFAULT_BASE;
 
 // Optional: protect the edge function with a required header token (to prevent public abuse)
