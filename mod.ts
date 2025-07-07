@@ -2,7 +2,6 @@
 import { serve } from 'https://deno.land/std@0.203.0/http/server.ts';
 
 // --- Configuration ---
-// Load and split keys per provider from environment variables
 const GEMINI_KEYS =
 	Deno.env
 		.get('GEMINI_KEYS')
@@ -22,7 +21,7 @@ const ANTHROPIC_KEYS =
 		.map(k => k.trim())
 		.filter(Boolean) ?? [];
 
-// Build a unified pool with tags
+// Combine into pool
 type Provider = 'gemini' | 'openai' | 'anthropic';
 interface KeyEntry {
 	provider: Provider;
@@ -34,10 +33,7 @@ const API_POOL: KeyEntry[] = [
 	...ANTHROPIC_KEYS.map(k => ({ provider: 'anthropic', key: k })),
 ];
 
-// Optional access guard header
 const ACCESS_TOKEN = Deno.env.get('ACCESS_TOKEN');
-
-// Rotation state
 let currentIndex = 0;
 interface KeyState {
 	exhaustedUntil?: number;
@@ -57,10 +53,8 @@ function getNextKeyIndex(): number | null {
 	return null;
 }
 
-// Serve incoming requests
 serve(async (req: Request) => {
 	try {
-		// Access control
 		if (ACCESS_TOKEN) {
 			const provided = req.headers.get('X-Access-Token');
 			if (provided !== ACCESS_TOKEN) {
@@ -68,33 +62,42 @@ serve(async (req: Request) => {
 			}
 		}
 
-		// Determine provider by URL prefix
 		const url = new URL(req.url);
-		const parts = url.pathname.split('/').filter(Boolean);
-		let provider: Provider = 'gemini';
-		let path = url.pathname;
+		const rawPath = url.pathname + url.search;
+		let provider: Provider;
+		let forwardPath = rawPath;
 
-		if (parts[0] === 'openai' || parts[0] === 'anthropic') {
-			provider = parts[0] as Provider;
-			// strip the prefix for upstream
-			parts.shift();
-			path = '/' + parts.join('/') + url.search;
+		// Determine provider by path prefix
+		if (rawPath.startsWith('/anthropic/')) {
+			provider = 'anthropic';
+		} else if (rawPath.startsWith('/openai/')) {
+			provider = 'openai';
+		} else if (rawPath.startsWith('/v1beta2/')) {
+			provider = 'gemini';
+		} else if (rawPath.startsWith('/v1/')) {
+			// treat generic /v1/ as OpenAI
+			provider = 'openai';
 		} else {
-			// default to gemini paths
-			path = url.pathname + url.search;
+			// default to Gemini for other paths
+			provider = 'gemini';
 		}
 
-		// Pick a key
-		let idx = getNextKeyIndex();
-		if (idx === null) {
+		// Strip known prefixes for OpenAI/Anthropic
+		if (provider === 'openai' && rawPath.startsWith('/openai/')) {
+			forwardPath = rawPath.slice('/openai'.length);
+		}
+		if (provider === 'anthropic' && rawPath.startsWith('/anthropic/')) {
+			forwardPath = rawPath.slice('/anthropic'.length);
+		}
+
+		const keyIndex = getNextKeyIndex();
+		if (keyIndex === null) {
 			return new Response('All API keys exhausted.', { status: 429 });
 		}
-		const entry = API_POOL[idx];
+		const entry = API_POOL[keyIndex];
 
-		// Construct upstream request
-		let upstreamUrl: string;
+		// Prepare headers
 		const headers = new Headers();
-		// Forward client headers except restricted
 		for (const [h, v] of req.headers) {
 			const low = h.toLowerCase();
 			if (['host', 'cookie', 'authorization'].includes(low)) continue;
@@ -104,28 +107,28 @@ serve(async (req: Request) => {
 			headers.set('content-type', req.headers.get('content-type')!);
 		}
 
-		// Set provider-specific URL and auth
+		// Construct upstream URL and auth
+		let upstreamUrl: string;
 		switch (provider) {
-			case 'gemini':
+			case 'gemini': {
 				const gemBase =
 					Deno.env.get('GEMINI_API_BASE_URL') ||
 					'https://generativelanguage.googleapis.com/v1beta2';
-				upstreamUrl = `${gemBase}${path}`;
-				// inject key as param
-				const gUrl = new URL(upstreamUrl);
-				gUrl.searchParams.set('key', entry.key);
-				upstreamUrl = gUrl.toString();
+				const u = new URL(gemBase + forwardPath);
+				u.searchParams.set('key', entry.key);
+				upstreamUrl = u.toString();
 				break;
-
-			case 'openai':
-				upstreamUrl = `https://api.openai.com${path}`;
+			}
+			case 'openai': {
+				upstreamUrl = `https://api.openai.com${forwardPath}`;
 				headers.set('Authorization', `Bearer ${entry.key}`);
 				break;
-
-			case 'anthropic':
-				upstreamUrl = `https://api.anthropic.com${path}`;
+			}
+			case 'anthropic': {
+				upstreamUrl = `https://api.anthropic.com${forwardPath}`;
 				headers.set('x-api-key', entry.key);
 				break;
+			}
 		}
 
 		// Forward request
@@ -134,14 +137,14 @@ serve(async (req: Request) => {
 			headers,
 			body: req.body,
 		});
-
-		// Retry on quota errors
 		let attempts = 1;
 		while ([401, 403, 429].includes(res.status) && attempts < API_POOL.length) {
-			keyStates[idx] = { exhaustedUntil: Date.now() + 60 * 60 * 1000 }; // 1h cooldown
-			idx = getNextKeyIndex()!;
-			const nextEntry = API_POOL[idx];
-			// update auth for next
+			// Cooldown the exhausted key
+			keyStates[keyIndex] = { exhaustedUntil: Date.now() + 60 * 60 * 1000 };
+			const nextIndex = getNextKeyIndex();
+			if (nextIndex === null) break;
+			const nextEntry = API_POOL[nextIndex];
+			// Update auth for next
 			switch (nextEntry.provider) {
 				case 'gemini': {
 					const u = new URL(upstreamUrl);
@@ -168,7 +171,7 @@ serve(async (req: Request) => {
 			return new Response(`Error: upstream ${res.status}`, { status: 429 });
 		}
 
-		// Return response
+		// Return response with CORS
 		const respHeaders = new Headers(res.headers);
 		respHeaders.set('Access-Control-Allow-Origin', '*');
 		return new Response(res.body, { status: res.status, headers: respHeaders });
