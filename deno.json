@@ -1,0 +1,10 @@
+{
+	"compilerOptions": {
+		"lib": ["deno.ns", "deno.web"],
+		"checkJs": false,
+		"strict": true
+	},
+	"tasks": {
+		"start": "deno run --allow-env --allow-net mod.ts"
+	}
+}
