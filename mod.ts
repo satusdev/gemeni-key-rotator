@@ -1,10 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import { serve } from 'https://deno.land/std@0.203.0/http/server.ts';
-import {
-	existsSync,
-	readTextFileSync,
-	writeTextFileSync,
-} from 'https://deno.land/std@0.203.0/fs/mod.ts';
+import { existsSync } from 'https://deno.land/std@0.203.0/fs/mod.ts';
 
 // ─── Configuration ─────────────────────────
 const API_KEYS = (Deno.env.get('API_KEYS') || '')
@@ -46,19 +42,20 @@ interface State {
 }
 let state: State = {};
 
-if (existsSync(STATE_FILE)) {
-	try {
-		state = JSON.parse(readTextFileSync(STATE_FILE));
-	} catch {
-		state = {};
+async function loadState() {
+	if (existsSync(STATE_FILE)) {
+		try {
+			state = JSON.parse(await Deno.readTextFile(STATE_FILE));
+		} catch {
+			state = {};
+		}
 	}
+	state.exhausted = state.exhausted || Array(API_KEYS.length).fill(0);
+	state.usage = state.usage || Array(API_KEYS.length).fill(0);
 }
 
-state.exhausted = state.exhausted || Array(API_KEYS.length).fill(0);
-state.usage = state.usage || Array(API_KEYS.length).fill(0);
-
-function saveState() {
-	writeTextFileSync(STATE_FILE, JSON.stringify(state));
+async function saveState() {
+	await Deno.writeTextFile(STATE_FILE, JSON.stringify(state));
 }
 
 // ─── Key Selection ─────────────────────────
@@ -73,10 +70,10 @@ function nextKey(): number | null {
 	return idx;
 }
 
-function cooldownKey(idx: number, status: number) {
+async function cooldownKey(idx: number, status: number) {
 	const ms = COOLDOWNS[status as number] ?? COOLDOWNS.default;
 	state.exhausted![idx] = Date.now() + ms;
-	saveState();
+	await saveState();
 }
 
 // ─── Request Handler ───────────────────────
@@ -180,7 +177,7 @@ async function handler(req: Request): Promise<Response> {
 	}
 
 	state.usage![idx]++;
-	saveState();
+	await saveState();
 
 	if ([401, 403, 429, 500].includes(res.status)) {
 		cooldownKey(idx, res.status);
@@ -194,4 +191,5 @@ async function handler(req: Request): Promise<Response> {
 
 // ─── Start Server ──────────────────────────
 console.log('Starting Gemini proxy with', API_KEYS.length, 'keys');
+await loadState();
 serve(handler);
