@@ -1,65 +1,91 @@
-# CLine Key Rotator Proxy
+# Google Gemini API Key Rotator
 
-A Deno Edge Function that round‑robins across multiple API keys and providers
-(Google Gemini, OpenAI, Anthropic). Deploy to Deno Deploy and point your CLine
-(or other) client at the single endpoint.
+This project provides a lightweight, Deno-based server that acts as a proxy to
+the Google Gemini API. It intelligently rotates a pool of API keys to help
+manage rate limits and prevent service interruptions.
 
 ## Features
 
-- Automatic rotation and cooldown of exhausted keys
-- Multi‑provider support:
-  - **gemini** (default path)
-  - **openai** (`/openai/...` prefix)
-  - **anthropic** (`/anthropic/...` prefix)
-- Optional header‑based access token to secure your proxy
-- CORS allowed by default
+- **API Key Rotation:** Automatically cycles through a list of API keys to
+  distribute requests and avoid hitting quota limits on a single key.
+- **Error Handling:** Detects when a key is exhausted (e.g.,
+  `429 Too Many Requests`) and automatically retries with the next available
+  key.
+- **Environment-Based Configuration:** Uses a `.env` file for easy and secure
+  management of API keys and other settings.
+- **Access Control:** Optional access token validation to protect your proxy
+  from unauthorized use.
+- **Centralized Dependencies:** Manages Deno dependencies through `deno.json`
+  for better version control.
 
-## Setup
+## Setup and Configuration
 
-1. **Clone this repo**
+1.  **Prerequisites:**
 
-   ```bash
-   git clone https://github.com/<your‑username>/cline-rotator.git
-   cd cline-rotator
-   ```
+    - [Deno](https://deno.land/) installed on your system.
 
-2. **Create a `deno.json`** in root (for local dev):
+2.  **Clone the repository:**
 
-   ```json
-   {
-   	"compilerOptions": {
-   		"lib": ["deno.ns", "deno.web"],
-   		"strict": true
-   	},
-   	"tasks": {
-   		"start": "deno run --allow-env --allow-net mod.ts"
-   	}
-   }
-   ```
+    ```bash
+    git clone https://github.com/nadbad/cline-key-rotator.git
+    cd cline-key-rotator
+    ```
 
-3. **Configure your keys in Deno Deploy** (or locally via `.env`):
+3.  **Create a `.env` file:** Create a file named `.env` in the root of the
+    project and add the following environment variables:
 
-   - `GEMINI_KEYS`: comma‑separated Google Gemini API keys
-   - `OPENAI_KEYS`: comma‑separated OpenAI API keys
-   - `ANTHROPIC_KEYS`: comma‑separated Anthropic API keys
-   - (Optional) `ACCESS_TOKEN`: secret token to guard access
+    ```env
+    # Comma-separated list of your Google Gemini API keys
+    API_KEYS=YOUR_API_KEY_1,YOUR_API_KEY_2,YOUR_API_KEY_3
 
-4. **Deploy to Deno Deploy**
+    # (Optional) Override the default Gemini API base URL
+    # GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 
-   - In Deno dashboard, import this repo
-   - Add the above environment variables
-   - Deploy and copy the production URL
+    # (Optional) Set a secret token to protect your proxy endpoint
+    # ACCESS_TOKEN=your-secret-access-token
+    ```
 
-5. **Point CLine to your proxy**
+## Usage
 
-   - In VS Code CLine settings → **Provider Base URL**, set:
-     `text https://<your‑project>.deno.dev `
-   - Leave API key blank in CLine (proxy handles it)
+To start the server, run the following command from the project root:
 
-6. **Usage**
-   - For Gemini (default): use CLine as usual
-   - For OpenAI: prefix endpoints with `/openai`, e.g.
-     `/openai/v1/chat/completions`
-   - For Anthropic: prefix with `/anthropic/v1/complete`
+```bash
+deno task start
+```
 
-Enjoy uninterrupted coding!
+The server will start on the default port (usually `8000`).
+
+## API
+
+Make requests to your Deno server as if you were calling the Google Gemini API
+directly. The server will forward your request with a valid API key.
+
+**Example using `curl`:**
+
+```bash
+curl -X POST "http://localhost:8000/v1beta/models/gemini-pro:generateContent" \
+-H "Content-Type: application/json" \
+-d '{
+  "contents": [{
+    "parts":[{
+      "text": "Explain how the self-attention mechanism works in a transformer model."
+    }]
+  }]
+}'
+```
+
+If you have set an `ACCESS_TOKEN` in your `.env` file, you must include it in
+the `X-Access-Token` header:
+
+```bash
+curl -X POST "http://localhost:8000/v1beta/models/gemini-pro:generateContent" \
+-H "Content-Type: application/json" \
+-H "X-Access-Token: your-secret-access-token" \
+-d '{
+  "contents": [{
+    "parts":[{
+      "text": "Explain how the self-attention mechanism works in a transformer model."
+    }]
+  }]
+}'
+```

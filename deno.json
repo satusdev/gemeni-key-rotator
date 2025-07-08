@@ -4,7 +4,27 @@
 		"checkJs": false,
 		"strict": true
 	},
+	"lint": {
+		"rules": {
+			"tags": ["recommended"],
+			"exclude": ["no-explicit-any"]
+		}
+	},
+	"fmt": {
+		"options": {
+			"useTabs": true,
+			"lineWidth": 80,
+			"indentWidth": 4,
+			"singleQuote": false
+		}
+	},
 	"tasks": {
-		"start": "deno run --allow-env --allow-net mod.ts"
+		"start": "deno run --allow-env --allow-net --allow-read mod.ts",
+		"lint": "deno lint",
+		"fmt": "deno fmt"
+	},
+	"imports": {
+		"std/": "https://deno.land/std@0.203.0/",
+		"dotenv": "https://deno.land/x/dotenv@v3.2.2/mod.ts"
 	}
 }

@@ -1,0 +1,5 @@
+# Environment variables
+.env
+
+# Deno lock files
+deno.lock
