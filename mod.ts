@@ -55,6 +55,10 @@ async function loadState() {
 }
 
 async function saveState() {
+	const dir = STATE_FILE.includes('/')
+		? STATE_FILE.substring(0, STATE_FILE.lastIndexOf('/'))
+		: '.';
+	await Deno.mkdir(dir, { recursive: true });
 	await Deno.writeTextFile(STATE_FILE, JSON.stringify(state));
 }
 
