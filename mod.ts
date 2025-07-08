@@ -35,32 +35,14 @@ function tooManyRequests(ip: string): boolean {
 }
 
 // ─── Persistent State ──────────────────────
-const STATE_FILE = 'state.json';
 interface State {
-	exhausted?: number[];
-	usage?: number[];
+	exhausted: number[];
+	usage: number[];
 }
-let state: State = {};
-
-async function loadState() {
-	if (existsSync(STATE_FILE)) {
-		try {
-			state = JSON.parse(await Deno.readTextFile(STATE_FILE));
-		} catch {
-			state = {};
-		}
-	}
-	state.exhausted = state.exhausted || Array(API_KEYS.length).fill(0);
-	state.usage = state.usage || Array(API_KEYS.length).fill(0);
-}
-
-async function saveState() {
-	const dir = STATE_FILE.includes('/')
-		? STATE_FILE.substring(0, STATE_FILE.lastIndexOf('/'))
-		: '.';
-	await Deno.mkdir(dir, { recursive: true });
-	await Deno.writeTextFile(STATE_FILE, JSON.stringify(state));
-}
+let state: State = {
+	exhausted: Array(API_KEYS.length).fill(0),
+	usage: Array(API_KEYS.length).fill(0),
+};
 
 // ─── Key Selection ─────────────────────────
 function nextKey(): number | null {
@@ -77,7 +59,6 @@ function nextKey(): number | null {
 async function cooldownKey(idx: number, status: number) {
 	const ms = COOLDOWNS[status as number] ?? COOLDOWNS.default;
 	state.exhausted![idx] = Date.now() + ms;
-	await saveState();
 }
 
 // ─── Request Handler ───────────────────────
@@ -181,7 +162,6 @@ async function handler(req: Request): Promise<Response> {
 	}
 
 	state.usage![idx]++;
-	await saveState();
 
 	if ([401, 403, 429, 500].includes(res.status)) {
 		cooldownKey(idx, res.status);
@@ -195,5 +175,4 @@ async function handler(req: Request): Promise<Response> {
 
 // ─── Start Server ──────────────────────────
 console.log('Starting Gemini proxy with', API_KEYS.length, 'keys');
-await loadState();
 serve(handler);
