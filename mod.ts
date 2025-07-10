@@ -62,8 +62,10 @@ async function cooldownKey(idx: number, status: number) {
 }
 
 // ─── Request Handler ───────────────────────
-async function handler(req: Request): Promise<Response> {
+async function handler(req: Request, retryCount = 0): Promise<Response> {
 	const ip = req.headers.get('x-forwarded-for') || 'unknown';
+
+	const MAX_RETRIES = 3;
 
 	if (tooManyRequests(ip)) {
 		return new Response(
@@ -146,6 +148,7 @@ async function handler(req: Request): Promise<Response> {
 			body: req.body,
 		});
 	} catch (e) {
+		console.error('Upstream fetch failed:', e);
 		cooldownKey(idx, 500);
 		return new Response(
 			JSON.stringify({
@@ -164,8 +167,30 @@ async function handler(req: Request): Promise<Response> {
 	state.usage![idx]++;
 
 	if ([401, 403, 429, 500].includes(res.status)) {
+		console.warn(
+			`Received status ${res.status} from upstream. Retry count: ${retryCount}`
+		);
 		cooldownKey(idx, res.status);
-		return handler(req);
+		if (retryCount < MAX_RETRIES) {
+			return handler(req, retryCount + 1);
+		} else {
+			console.error(`Max retries reached for request from IP: ${ip}`);
+			return new Response(
+				JSON.stringify({
+					error: {
+						message: 'Upstream fetch failed after retries',
+						status: 500,
+					},
+				}),
+				{
+					status: 500,
+					headers: {
+						'Content-Type': 'application/json',
+						'Access-Control-Allow-Origin': '*',
+					},
+				}
+			);
+		}
 	}
 
 	const h = new Headers(res.headers);
