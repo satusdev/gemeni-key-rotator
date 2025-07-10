@@ -72,7 +72,30 @@ function errorWithTimestamp(...args: unknown[]) {
 	console.error(new Date().toISOString(), ...args);
 }
 
-async function handler(req: Request, retryCount = 0): Promise<Response> {
+function getRetryCount(arg: unknown): number {
+	if (typeof arg === 'number') return arg;
+	if (
+		typeof arg === 'object' &&
+		arg !== null &&
+		'retryCount' in arg &&
+		typeof (arg as any).retryCount === 'number'
+	) {
+		return (arg as any).retryCount;
+	}
+	return 0;
+}
+
+function maskApiKey(key: string): string {
+	if (!key) return '(empty)';
+	if (key.length <= 8) return '***';
+	return key.slice(0, 4) + '***' + key.slice(-4);
+}
+
+async function handler(
+	req: Request,
+	retryCountOrConn?: unknown
+): Promise<Response> {
+	const retryCount = getRetryCount(retryCountOrConn);
 	const ip = req.headers.get('x-forwarded-for') || 'unknown';
 	const MAX_RETRIES = 3;
 
@@ -149,7 +172,24 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 	}
 
 	const apiKey = API_KEYS[idx];
-	logWithTimestamp(`Using API key index: ${idx} for IP: ${ip}`);
+	if (!apiKey || apiKey === '123' || apiKey.length < 10) {
+		errorWithTimestamp(`Invalid API key at index ${idx}:`, maskApiKey(apiKey));
+		return new Response(
+			JSON.stringify({
+				error: { message: 'Invalid or missing API key', status: 500 },
+			}),
+			{
+				status: 500,
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*',
+				},
+			}
+		);
+	}
+	logWithTimestamp(
+		`Using API key index: ${idx} (${maskApiKey(apiKey)}) for IP: ${ip}`
+	);
 	const url = new URL(req.url);
 	const target = new URL(url.pathname + url.search, GEMINI_BASE);
 	target.searchParams.set('key', apiKey);
@@ -163,10 +203,15 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 
 	const fwd = new Headers();
 	for (const [k, v] of req.headers) {
-		if (!['host', 'cookie', 'authorization'].includes(k.toLowerCase())) {
+		const lower = k.toLowerCase();
+		if (
+			!['host', 'cookie', 'authorization', 'x-goog-api-key'].includes(lower)
+		) {
 			fwd.set(k, v);
 		}
 	}
+	// Always set the correct API key from env, never from incoming request
+	fwd.set('x-goog-api-key', apiKey);
 
 	let res: Response;
 	try {
