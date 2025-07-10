@@ -93,7 +93,8 @@ function maskApiKey(key: string): string {
 
 async function handler(
 	req: Request,
-	retryCountOrConn?: unknown
+	retryCountOrConn?: unknown,
+	bufferedBody?: Uint8Array | null
 ): Promise<Response> {
 	const retryCount = getRetryCount(retryCountOrConn);
 	const ip = req.headers.get('x-forwarded-for') || 'unknown';
@@ -191,6 +192,8 @@ async function handler(
 		`Using API key index: ${idx} (${maskApiKey(apiKey)}) for IP: ${ip}`
 	);
 	const url = new URL(req.url);
+	// Remove any incoming 'key' param from the query string
+	url.searchParams.delete('key');
 	const target = new URL(url.pathname + url.search, GEMINI_BASE);
 	target.searchParams.set('key', apiKey);
 
@@ -198,7 +201,9 @@ async function handler(
 		url: target.toString(),
 		method: req.method,
 		headers: Object.fromEntries(req.headers),
-		body: req.body ? '[stream/body present]' : null,
+		body: bufferedBody
+			? `[${bufferedBody.length} bytes buffered]`
+			: '[no body]',
 	});
 
 	const fwd = new Headers();
@@ -213,12 +218,21 @@ async function handler(
 	// Always set the correct API key from env, never from incoming request
 	fwd.set('x-goog-api-key', apiKey);
 
+	let bodyToSend: Uint8Array | null = null;
+	if (req.method !== 'GET' && req.method !== 'HEAD') {
+		if (bufferedBody) {
+			bodyToSend = bufferedBody;
+		} else {
+			bodyToSend = new Uint8Array(await req.arrayBuffer());
+		}
+	}
+
 	let res: Response;
 	try {
 		res = await fetch(target.toString(), {
 			method: req.method,
 			headers: fwd,
-			body: req.body,
+			body: bodyToSend ? (bodyToSend as Uint8Array) : undefined,
 		});
 	} catch (e) {
 		errorWithTimestamp('Upstream fetch failed:', e, e?.stack);
@@ -256,7 +270,7 @@ async function handler(
 
 		cooldownKey(idx, res.status);
 		if (retryCount < MAX_RETRIES) {
-			return handler(req, retryCount + 1);
+			return handler(req, retryCount + 1, bodyToSend);
 		} else {
 			errorWithTimestamp(`Max retries reached for request from IP: ${ip}`);
 			return new Response(
