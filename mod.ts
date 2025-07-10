@@ -62,12 +62,30 @@ async function cooldownKey(idx: number, status: number) {
 }
 
 // ─── Request Handler ───────────────────────
+function logWithTimestamp(...args: unknown[]) {
+	console.log(new Date().toISOString(), ...args);
+}
+function warnWithTimestamp(...args: unknown[]) {
+	console.warn(new Date().toISOString(), ...args);
+}
+function errorWithTimestamp(...args: unknown[]) {
+	console.error(new Date().toISOString(), ...args);
+}
+
 async function handler(req: Request, retryCount = 0): Promise<Response> {
 	const ip = req.headers.get('x-forwarded-for') || 'unknown';
-
 	const MAX_RETRIES = 3;
 
+	logWithTimestamp('Incoming request', {
+		method: req.method,
+		url: req.url,
+		headers: Object.fromEntries(req.headers),
+		ip,
+		retryCount,
+	});
+
 	if (tooManyRequests(ip)) {
+		warnWithTimestamp(`Rate limit exceeded for IP: ${ip}`);
 		return new Response(
 			JSON.stringify({
 				error: { message: 'Rate limit exceeded', status: 429 },
@@ -98,6 +116,7 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 	}
 
 	if (ACCESS_TOKEN && req.headers.get('X-Access-Token') !== ACCESS_TOKEN) {
+		warnWithTimestamp(`Unauthorized access attempt from IP: ${ip}`);
 		return new Response(
 			JSON.stringify({
 				error: { message: 'Unauthorized', status: 401 },
@@ -114,6 +133,7 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 
 	const idx = nextKey();
 	if (idx === null) {
+		warnWithTimestamp('All API keys exhausted for request from IP:', ip);
 		return new Response(
 			JSON.stringify({
 				error: { message: 'All API keys exhausted', status: 429 },
@@ -129,9 +149,17 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 	}
 
 	const apiKey = API_KEYS[idx];
+	logWithTimestamp(`Using API key index: ${idx} for IP: ${ip}`);
 	const url = new URL(req.url);
 	const target = new URL(url.pathname + url.search, GEMINI_BASE);
 	target.searchParams.set('key', apiKey);
+
+	logWithTimestamp('Upstream request', {
+		url: target.toString(),
+		method: req.method,
+		headers: Object.fromEntries(req.headers),
+		body: req.body ? '[stream/body present]' : null,
+	});
 
 	const fwd = new Headers();
 	for (const [k, v] of req.headers) {
@@ -148,7 +176,7 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 			body: req.body,
 		});
 	} catch (e) {
-		console.error('Upstream fetch failed:', e);
+		errorWithTimestamp('Upstream fetch failed:', e, e?.stack);
 		cooldownKey(idx, 500);
 		return new Response(
 			JSON.stringify({
@@ -166,20 +194,33 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 
 	state.usage![idx]++;
 
+	logWithTimestamp('Upstream response', {
+		status: res.status,
+		headers: Object.fromEntries(res.headers),
+	});
+
 	if ([401, 403, 429, 500].includes(res.status)) {
-		console.warn(
+		warnWithTimestamp(
 			`Received status ${res.status} from upstream. Retry count: ${retryCount}`
 		);
+		let errorBody = '';
+		try {
+			errorBody = await res.clone().text();
+		} catch (_) {}
+		warnWithTimestamp('Upstream error response body:', errorBody);
+
 		cooldownKey(idx, res.status);
 		if (retryCount < MAX_RETRIES) {
 			return handler(req, retryCount + 1);
 		} else {
-			console.error(`Max retries reached for request from IP: ${ip}`);
+			errorWithTimestamp(`Max retries reached for request from IP: ${ip}`);
 			return new Response(
 				JSON.stringify({
 					error: {
 						message: 'Upstream fetch failed after retries',
 						status: 500,
+						upstreamStatus: res.status,
+						upstreamBody: errorBody,
 					},
 				}),
 				{
@@ -199,5 +240,5 @@ async function handler(req: Request, retryCount = 0): Promise<Response> {
 }
 
 // ─── Start Server ──────────────────────────
-console.log('Starting Gemini proxy with', API_KEYS.length, 'keys');
+logWithTimestamp('Starting Gemini proxy with', API_KEYS.length, 'keys');
 serve(handler);
