@@ -1,4 +1,4 @@
-# Google Gemini API Key Rotator
+# Gemini API Key Rotator
 
 This project provides a lightweight, Deno-based server that acts as a proxy to
 the Google Gemini API. It intelligently rotates a pool of API keys to help
@@ -6,86 +6,78 @@ manage rate limits and prevent service interruptions.
 
 ## Features
 
-- **API Key Rotation:** Automatically cycles through a list of API keys to
-  distribute requests and avoid hitting quota limits on a single key.
-- **Error Handling:** Detects when a key is exhausted (e.g.,
-  `429 Too Many Requests`) and automatically retries with the next available
-  key.
-- **Environment-Based Configuration:** Uses a `.env` file for easy and secure
-  management of API keys and other settings.
-- **Access Control:** Optional access token validation to protect your proxy
-  from unauthorized use.
-- **Centralized Dependencies:** Manages Deno dependencies through `deno.json`
-  for better version control.
+- **API Key Rotation**: Automatically rotates through a list of API keys to
+  distribute requests.
+- **Rate Limiting**: Basic IP-based rate limiting to prevent abuse.
+- **Cooldowns**: When an API key hits a rate limit (429) or encounters a server
+  error (500), it's put on a cooldown to prevent further issues.
+- **Retries**: Automatically retries requests that fail with a 500 error, up to
+  a configurable limit.
+- **Access Control**: Optional access token to secure the proxy.
+- **Detailed Logging**: Comprehensive logging for easy debugging.
 
-## Setup and Configuration
+## Setup and Usage
 
-1.  **Prerequisites:**
-
-    - [Deno](https://deno.land/) installed on your system.
-
-2.  **Clone the repository:**
+1.  **Clone the repository**:
 
     ```bash
     git clone https://github.com/nadbad/cline-key-rotator.git
     cd cline-key-rotator
     ```
 
-3.  **Create a `.env` file:** Create a file named `.env` in the root of the
-    project and add the following environment variables:
+2.  **Install Deno**: Follow the instructions on the
+    [Deno website](https://deno.land/#installation).
 
-    ```env
-    # Comma-separated list of your Google Gemini API keys
-    API_KEYS=YOUR_API_KEY_1,YOUR_API_KEY_2,YOUR_API_KEY_3
+3.  **Set Environment Variables**: Create a `.env` file in the root of the
+    project with the following variables:
 
-    # (Optional) Override the default Gemini API base URL
-    # GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
-
-    # (Optional) Set a secret token to protect your proxy endpoint
-    # ACCESS_TOKEN=your-secret-access-token
+    ```
+    API_KEYS=your_api_key_1,your_api_key_2,your_api_key_3
+    GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+    ACCESS_TOKEN=your_secret_access_token # Optional
     ```
 
-## Usage
+4.  **Run the server**:
 
-To start the server, run the following command from the project root:
+    ```bash
+    deno run --allow-env --allow-net --allow-read mod.ts
+    ```
 
-```bash
-deno task start
-```
+    The server will start on port 8000.
 
-The server will start on the default port (usually `8000`).
+## Contributing
 
-## API
+This project uses `commitlint` to enforce conventional commit messages and
+`release-please` to automate releases.
 
-Make requests to your Deno server as if you were calling the Google Gemini API
-directly. The server will forward your request with a valid API key.
+1.  **Install dependencies**:
 
-**Example using `curl`:**
+    ```bash
+    npm install
+    ```
 
-```bash
-curl -X POST "http://localhost:8000/v1beta/models/gemini-pro:generateContent" \
--H "Content-Type: application/json" \
--d '{
-  "contents": [{
-    "parts":[{
-      "text": "Explain how the self-attention mechanism works in a transformer model."
-    }]
-  }]
-}'
-```
+2.  **Make your changes**.
 
-If you have set an `ACCESS_TOKEN` in your `.env` file, you must include it in
-the `X-Access-Token` header:
+3.  **Commit your changes**: Your commit messages must follow the
+    [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+    format. For example:
 
-```bash
-curl -X POST "http://localhost:8000/v1beta/models/gemini-pro:generateContent" \
--H "Content-Type: application/json" \
--H "X-Access-Token: your-secret-access-token" \
--d '{
-  "contents": [{
-    "parts":[{
-      "text": "Explain how the self-attention mechanism works in a transformer model."
-    }]
-  }]
-}'
-```
+    ```
+    feat: add new feature
+    fix: correct a bug
+    docs: update documentation
+    ```
+
+4.  **Push your changes**: When you push to `main`, `release-please` will
+    automatically create a pull request with the next version number and release
+    notes.
+
+## Future Enhancements
+
+- **Persistent State**: Store the state of the API keys (exhausted times, usage)
+  in a database or file to persist across server restarts.
+- **More Sophisticated Key Selection**: Implement more advanced key selection
+  strategies, such as least-recently-used or round-robin.
+- **Improved Error Handling**: More granular error handling and reporting.
+- **Dashboard**: A simple web-based dashboard to monitor the status of the API
+  keys.

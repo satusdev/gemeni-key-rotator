@@ -1,0 +1,28 @@
+{
+	"name": "cline-key-rotator",
+	"version": "1.0.0",
+	"description": "This project provides a lightweight, Deno-based server that acts as a proxy to the Google Gemini API. It intelligently rotates a pool of API keys to help manage rate limits and prevent service interruptions.",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"prepare": "husky install"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nadbad/cline-key-rotator.git"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"type": "commonjs",
+	"bugs": {
+		"url": "https://github.com/nadbad/cline-key-rotator/issues"
+	},
+	"homepage": "https://github.com/nadbad/cline-key-rotator#readme",
+	"devDependencies": {
+		"@commitlint/cli": "^19.8.1",
+		"@commitlint/config-conventional": "^19.8.1",
+		"husky": "^9.1.7",
+		"release-please": "^17.1.1"
+	}
+}

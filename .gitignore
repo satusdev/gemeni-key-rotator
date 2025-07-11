@@ -3,3 +3,4 @@
 
 # Deno lock files
 deno.lock
+node_modules
