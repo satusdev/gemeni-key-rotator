@@ -21,8 +21,8 @@ manage rate limits and prevent service interruptions.
 1.  **Clone the repository**:
 
     ```bash
-    git clone https://github.com/nadbad/cline-key-rotator.git
-    cd cline-key-rotator
+    git clone https://github.com/satusdev/gemeni-key-rotator.git
+    cd gemeni-key-rotator
     ```
 
 2.  **Install Deno**: Follow the instructions on the
