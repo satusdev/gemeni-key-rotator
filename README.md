@@ -25,46 +25,60 @@ manage rate limits and prevent service interruptions.
 This project requires [Deno](https://deno.land/) to run. For development, you
 will also need [Node.js](https://nodejs.org/en) 18 or higher.
 
-## Getting Started ☣️
+## Getting Started 🚀
 
-1. ) First clone project
+There are two ways to use this project: deploying it to Deno Deploy or running
+it locally.
 
-```bash
-  git clone https://github.com/satusdev/gemeni-key-rotator.git
-```
+### Option 1: Deploy on Deno Deploy (Recommended)
 
-2. ) Go to the project directory
+1.  **Fork this repository.**
+2.  Go to [Deno Deploy](https://deno.com/deploy) and create a new project.
+3.  Link your GitHub account and select your forked repository.
+4.  In the project settings, add your environment variables (see
+    [Configuration](#configuration-)).
+5.  Deploy! Your Gemini Key Rotator is now live.
 
-```bash
-  cd gemeni-key-rotator/
-```
+### Option 2: Run Locally
 
-3. ) Copy env file
+1.  **Clone the repository:**
 
-```bash
-  cp .env.example .env
-```
+    ```bash
+    git clone https://github.com/satusdev/gemeni-key-rotator.git
+    cd gemeni-key-rotator
+    ```
 
-4. ) Install necessary dependencies for development
+2.  **Set up environment variables:**
 
-```bash
-  npm i
-```
+    Create a `.env` file by copying the example:
 
-5. ) Run the server
+    ```bash
+    cp .env.example .env
+    ```
 
-```bash
-deno run --allow-env --allow-net --allow-read mod.ts
-```
+    Then, edit the `.env` file to add your API keys.
 
-## Configuration 🥣
+3.  **Run the server:**
 
-To setup the project, you'll need to edit the env variable within the copied env
-file.
+    ```bash
+    deno run --allow-env --allow-net --allow-read mod.ts
+    ```
+
+## Configuration ⚙️
+
+This project is configured through environment variables. See `.env.example` for
+all available options.
+
+### Required
 
 - `API_KEYS`: A comma-separated list of your Gemini API keys.
-- `GEMINI_API_BASE_URL`: The base URL for the Gemini API.
-- `ACCESS_TOKEN`: An optional access token to secure the proxy.
+
+### Optional
+
+- `ACCESS_TOKEN`: A token to secure the proxy. If set, requests must include an
+  `Authorization: Bearer <ACCESS_TOKEN>` header.
+- `GEMINI_API_BASE_URL`: The base URL for the Gemini API. Defaults to
+  `https://generativelanguage.googleapis.com`.
 
 ## Features at a glance 🚀
 
@@ -112,3 +126,7 @@ This project uses `commitlint` to enforce conventional commit messages and
 
 If you're having issues with anything, please open an issue on the GitHub
 repository.
+
+```
+
+```
