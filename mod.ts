@@ -1,6 +1,27 @@
 // deno-lint-ignore-file no-explicit-any
 import { serve } from 'https://deno.land/std@0.203.0/http/server.ts';
-import { existsSync } from 'https://deno.land/std@0.203.0/fs/mod.ts';
+import 'https://deno.land/x/dotenv@v3.2.2/load.ts';
+
+/*
+Usage Example:
+
+1. Set your API keys in an .env file (or environment variables):
+   API_KEYS=your_key_1,your_key_2
+
+2. Run the server:
+   deno run --allow-net --allow-env mod.ts
+
+3. Make a request using curl:
+   curl -X POST "http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent" \
+        -H "Content-Type: application/json" \
+        -d '{
+              "contents": [{
+                "parts":[{
+                  "text": "Write a story about a magic backpack."
+                }]
+              }]
+            }'
+*/
 
 // ─── Configuration ─────────────────────────
 const API_KEYS = (Deno.env.get('API_KEYS') || '')
@@ -10,22 +31,26 @@ const API_KEYS = (Deno.env.get('API_KEYS') || '')
 
 const GEMINI_BASE =
 	Deno.env.get('GEMINI_API_BASE_URL') ||
-	'https://generativelanguage.googleapis.com/v1beta';
-const ACCESS_TOKEN = Deno.env.get('ACCESS_TOKEN');
+	'https://generativelanguage.googleapis.com';
+
+const MAX_RETRIES = 3;
 
 // Cooldown times per status
 const COOLDOWNS: Record<number | string, number> = {
-	429: 5 * 60 * 1000,
-	500: 1 * 60 * 1000,
-	default: 10 * 1000,
+	429: 5 * 60 * 1000, // 5 minutes for rate limit
+	500: 1 * 60 * 1000, // 1 minute for server errors
+	502: 1 * 60 * 1000,
+	503: 1 * 60 * 1000,
+	504: 1 * 60 * 1000,
+	default: 10 * 1000, // 10 seconds for other issues
 };
 
-// ─── Rate Limiting ─────────────────────────
-const LIMIT_WINDOW = 60 * 1000;
-const LIMIT_COUNT = 60;
+// ─── Rate Limiting (per IP) ────────────────
+const LIMIT_WINDOW = 60 * 1000; // 1 minute
+const LIMIT_COUNT = 60; // 60 requests per minute
 const ipLogs = new Map<string, number[]>();
 
-function tooManyRequests(ip: string): boolean {
+function isRateLimited(ip: string): boolean {
 	const now = Date.now();
 	const times = ipLogs.get(ip) || [];
 	const recent = times.filter(t => now - t < LIMIT_WINDOW);
@@ -45,259 +70,152 @@ let state: State = {
 };
 
 // ─── Key Selection ─────────────────────────
-function nextKey(): number | null {
+function getNextAvailableKeyIndex(): number | null {
 	const now = Date.now();
 	const available = state.exhausted
-		.map((t, i) => ({ t, i }))
-		.filter(x => x.t < now)
-		.map(x => x.i);
+		.map((timestamp, index) => ({ timestamp, index }))
+		.filter(item => item.timestamp < now)
+		.map(item => item.index);
+
 	if (available.length === 0) return null;
-	const idx = available[Math.floor(Math.random() * available.length)];
-	return idx;
+
+	// Find the key with the minimum usage among available keys
+	const bestKey = available.reduce(
+		(prev, curr) => (state.usage[curr] < state.usage[prev] ? curr : prev),
+		available[0]
+	);
+	return bestKey;
 }
 
-async function cooldownKey(idx: number, status: number) {
-	const ms = COOLDOWNS[status as number] ?? COOLDOWNS.default;
-	state.exhausted![idx] = Date.now() + ms;
+function cooldownKey(index: number, status: number) {
+	const cooldownMs = COOLDOWNS[status] ?? COOLDOWNS.default;
+	state.exhausted[index] = Date.now() + cooldownMs;
+	console.log(
+		`[COOLDOWN] Key index ${index} cooled down for ${
+			cooldownMs / 1000
+		}s due to status ${status}`
+	);
 }
 
 // ─── Request Handler ───────────────────────
-function logWithTimestamp(...args: unknown[]) {
-	console.log(new Date().toISOString(), ...args);
-}
-function warnWithTimestamp(...args: unknown[]) {
-	console.warn(new Date().toISOString(), ...args);
-}
-function errorWithTimestamp(...args: unknown[]) {
-	console.error(new Date().toISOString(), ...args);
-}
-
-function getRetryCount(arg: unknown): number {
-	if (typeof arg === 'number') return arg;
-	if (
-		typeof arg === 'object' &&
-		arg !== null &&
-		'retryCount' in arg &&
-		typeof (arg as any).retryCount === 'number'
-	) {
-		return (arg as any).retryCount;
-	}
-	return 0;
-}
-
-function maskApiKey(key: string): string {
-	if (!key) return '(empty)';
-	if (key.length <= 8) return '***';
-	return key.slice(0, 4) + '***' + key.slice(-4);
-}
-
-async function handler(
-	req: Request,
-	retryCountOrConn?: unknown,
-	bufferedBody?: Uint8Array | null
-): Promise<Response> {
-	const retryCount = getRetryCount(retryCountOrConn);
+async function handler(req: Request): Promise<Response> {
 	const ip = req.headers.get('x-forwarded-for') || 'unknown';
-	const MAX_RETRIES = 3;
+	console.log(`\n[REQUEST] Incoming from ${ip} to ${req.url}`);
 
-	logWithTimestamp('Incoming request', {
-		method: req.method,
-		url: req.url,
-		headers: Object.fromEntries(req.headers),
-		ip,
-		retryCount,
-	});
-
-	if (tooManyRequests(ip)) {
-		warnWithTimestamp(`Rate limit exceeded for IP: ${ip}`);
+	if (isRateLimited(ip)) {
+		console.warn(`[RATE LIMIT] IP ${ip} has been rate limited.`);
 		return new Response(
-			JSON.stringify({
-				error: { message: 'Rate limit exceeded', status: 429 },
-			}),
+			JSON.stringify({ error: { message: 'Rate limit exceeded' } }),
 			{
 				status: 429,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*',
-				},
+				headers: { 'Content-Type': 'application/json' },
 			}
 		);
 	}
 
-	if (tooManyRequests(ip)) {
-		return new Response(
-			JSON.stringify({
-				error: { message: 'Rate limit exceeded', status: 429 },
-			}),
-			{
-				status: 429,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*',
-				},
-			}
-		);
-	}
+	const body = await req.arrayBuffer();
 
-	if (ACCESS_TOKEN && req.headers.get('X-Access-Token') !== ACCESS_TOKEN) {
-		warnWithTimestamp(`Unauthorized access attempt from IP: ${ip}`);
-		return new Response(
-			JSON.stringify({
-				error: { message: 'Unauthorized', status: 401 },
-			}),
-			{
-				status: 401,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*',
-				},
-			}
-		);
-	}
-
-	const idx = nextKey();
-	if (idx === null) {
-		warnWithTimestamp('All API keys exhausted for request from IP:', ip);
-		return new Response(
-			JSON.stringify({
-				error: { message: 'All API keys exhausted', status: 429 },
-			}),
-			{
-				status: 429,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*',
-				},
-			}
-		);
-	}
-
-	const apiKey = API_KEYS[idx];
-	if (!apiKey || apiKey === '123' || apiKey.length < 10) {
-		errorWithTimestamp(`Invalid API key at index ${idx}:`, maskApiKey(apiKey));
-		return new Response(
-			JSON.stringify({
-				error: { message: 'Invalid or missing API key', status: 500 },
-			}),
-			{
-				status: 500,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*',
-				},
-			}
-		);
-	}
-	logWithTimestamp(
-		`Using API key index: ${idx} (${maskApiKey(apiKey)}) for IP: ${ip}`
-	);
-	const url = new URL(req.url);
-	// Remove any incoming 'key' param from the query string
-	url.searchParams.delete('key');
-	const target = new URL(url.pathname + url.search, GEMINI_BASE);
-	target.searchParams.set('key', apiKey);
-
-	logWithTimestamp('Upstream request', {
-		url: target.toString(),
-		method: req.method,
-		headers: Object.fromEntries(req.headers),
-		body: bufferedBody
-			? `[${bufferedBody.length} bytes buffered]`
-			: '[no body]',
-	});
-
-	const fwd = new Headers();
-	for (const [k, v] of req.headers) {
-		const lower = k.toLowerCase();
-		if (
-			!['host', 'cookie', 'authorization', 'x-goog-api-key'].includes(lower)
-		) {
-			fwd.set(k, v);
-		}
-	}
-	// Always set the correct API key from env, never from incoming request
-	fwd.set('x-goog-api-key', apiKey);
-
-	let bodyToSend: Uint8Array | null = null;
-	if (req.method !== 'GET' && req.method !== 'HEAD') {
-		if (bufferedBody) {
-			bodyToSend = bufferedBody;
-		} else {
-			bodyToSend = new Uint8Array(await req.arrayBuffer());
-		}
-	}
-
-	let res: Response;
-	try {
-		res = await fetch(target.toString(), {
-			method: req.method,
-			headers: fwd,
-			body: bodyToSend ? (bodyToSend as Uint8Array) : undefined,
-		});
-	} catch (e) {
-		errorWithTimestamp('Upstream fetch failed:', e, e?.stack);
-		cooldownKey(idx, 500);
-		return new Response(
-			JSON.stringify({
-				error: { message: 'Upstream fetch failed', status: 500 },
-			}),
-			{
-				status: 500,
-				headers: {
-					'Content-Type': 'application/json',
-					'Access-Control-Allow-Origin': '*',
-				},
-			}
-		);
-	}
-
-	state.usage![idx]++;
-
-	logWithTimestamp('Upstream response', {
-		status: res.status,
-		headers: Object.fromEntries(res.headers),
-	});
-
-	if ([401, 403, 429, 500].includes(res.status)) {
-		warnWithTimestamp(
-			`Received status ${res.status} from upstream. Retry count: ${retryCount}`
-		);
-		let errorBody = '';
-		try {
-			errorBody = await res.clone().text();
-		} catch (_) {}
-		warnWithTimestamp('Upstream error response body:', errorBody);
-
-		cooldownKey(idx, res.status);
-		if (retryCount < MAX_RETRIES) {
-			return handler(req, retryCount + 1, bodyToSend);
-		} else {
-			errorWithTimestamp(`Max retries reached for request from IP: ${ip}`);
+	for (let i = 0; i < MAX_RETRIES; i++) {
+		const keyIndex = getNextAvailableKeyIndex();
+		if (keyIndex === null) {
+			console.warn('[KEYS] All API keys are currently exhausted.');
 			return new Response(
 				JSON.stringify({
-					error: {
-						message: 'Upstream fetch failed after retries',
-						status: 500,
-						upstreamStatus: res.status,
-						upstreamBody: errorBody,
-					},
+					error: { message: 'All API keys are currently exhausted' },
 				}),
 				{
-					status: 500,
-					headers: {
-						'Content-Type': 'application/json',
-						'Access-Control-Allow-Origin': '*',
-					},
+					status: 429,
+					headers: { 'Content-Type': 'application/json' },
 				}
 			);
 		}
+
+		const apiKey = API_KEYS[keyIndex];
+		const url = new URL(req.url);
+		const targetUrl = new URL(url.pathname + url.search, GEMINI_BASE);
+		targetUrl.searchParams.set('key', apiKey);
+
+		console.log(
+			`[PROXY ATTEMPT ${
+				i + 1
+			}/${MAX_RETRIES}] Using key index ${keyIndex}. Target URL: ${targetUrl}`
+		);
+
+		const headersToForward = new Headers();
+		for (const [key, value] of req.headers) {
+			const lowerKey = key.toLowerCase();
+			if (
+				![
+					'host',
+					'authorization',
+					'x-goog-api-key',
+					'x-access-token',
+					'content-length',
+				].includes(lowerKey)
+			) {
+				headersToForward.set(key, value);
+			}
+		}
+		headersToForward.set('x-goog-api-key', apiKey);
+
+		try {
+			const res = await fetch(targetUrl.toString(), {
+				method: req.method,
+				headers: headersToForward,
+				body: body,
+			});
+
+			console.log(`[RESPONSE] Upstream status: ${res.status}`);
+			state.usage[keyIndex]++;
+
+			if (res.ok) {
+				const responseHeaders = new Headers(res.headers);
+				responseHeaders.set('Access-Control-Allow-Origin', '*');
+				return new Response(res.body, {
+					status: res.status,
+					headers: responseHeaders,
+				});
+			}
+
+			cooldownKey(keyIndex, res.status);
+			const errorBody = await res.text();
+			console.error(
+				`[ERROR] Upstream error: ${res.status} ${res.statusText}. Body: ${errorBody}`
+			);
+
+			if (res.status === 429 || res.status >= 500) {
+				console.log(`[RETRY] Retrying due to status ${res.status}...`);
+				continue;
+			}
+
+			return new Response(errorBody, {
+				status: res.status,
+				headers: { 'Content-Type': 'application/json' },
+			});
+		} catch (e) {
+			console.error(`[FATAL ATTEMPT ${i + 1}] Fetch failed:`, e);
+			cooldownKey(keyIndex, 500);
+		}
 	}
 
-	const h = new Headers(res.headers);
-	h.set('Access-Control-Allow-Origin', '*');
-	return new Response(res.body, { status: res.status, headers: h });
+	return new Response(
+		JSON.stringify({
+			error: { message: `Upstream fetch failed after ${MAX_RETRIES} retries` },
+		}),
+		{
+			status: 502, // Bad Gateway
+			headers: { 'Content-Type': 'application/json' },
+		}
+	);
 }
 
 // ─── Start Server ──────────────────────────
-logWithTimestamp('Starting Gemini proxy with', API_KEYS.length, 'keys');
-serve(handler);
+if (API_KEYS.length === 0) {
+	console.error(
+		'No API_KEYS found. Please set them in your .env file or as an environment variable.'
+	);
+	Deno.exit(1);
+}
+
+console.log(`Starting Gemini proxy with ${API_KEYS.length} key(s).`);
+serve(handler, { port: 8000 });

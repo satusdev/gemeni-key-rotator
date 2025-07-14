@@ -64,6 +64,33 @@ it locally.
     deno run --allow-env --allow-net --allow-read mod.ts
     ```
 
+    Your proxy will be running at `http://localhost:8000`.
+
+    #### Usage Examples
+
+    ##### cURL (Bash/Zsh)
+
+    ```bash
+    curl -X POST "http://localhost:8000/v1beta/models/gemini-pro:generateContent" \
+         -H "Content-Type: application/json" \
+         -d '{
+               "contents": [{
+                 "parts":[{
+                   "text": "Write a story about a magic backpack."
+                 }]
+               }]
+             }'
+    ```
+
+    ##### PowerShell
+
+    ```powershell
+    Invoke-WebRequest -Uri "http://localhost:8000/v1beta/models/gemini-pro:generateContent" `
+      -Method POST `
+      -Headers @{"Content-Type"="application/json"} `
+      -Body '{"contents":[{"parts":[{"text": "Write a story about a magic backpack."}]}]}'
+    ```
+
 ## Configuration ⚙️
 
 This project is configured through environment variables. See `.env.example` for
@@ -75,8 +102,6 @@ all available options.
 
 ### Optional
 
-- `ACCESS_TOKEN`: A token to secure the proxy. If set, requests must include an
-  `Authorization: Bearer <ACCESS_TOKEN>` header.
 - `GEMINI_API_BASE_URL`: The base URL for the Gemini API. Defaults to
   `https://generativelanguage.googleapis.com`.
 
@@ -86,9 +111,9 @@ all available options.
   distribute requests.
 - **Rate Limiting**: Basic IP-based rate limiting to prevent abuse.
 - **Cooldowns**: When an API key hits a rate limit (429) or encounters a server
-  error (500), it's put on a cooldown.
-- **Retries**: Automatically retries requests that fail with a 500 error.
-- **Access Control**: Optional access token to secure the proxy.
+  error (5xx), it's put on a cooldown.
+- **Retries**: Automatically retries requests that fail with a rate limit error
+  (429) or a server error (5xx).
 - **Detailed Logging**: Comprehensive logging for easy debugging.
 
 ## Built with 📦️
@@ -126,7 +151,3 @@ This project uses `commitlint` to enforce conventional commit messages and
 
 If you're having issues with anything, please open an issue on the GitHub
 repository.
-
-```
-
-```
