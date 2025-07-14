@@ -141,22 +141,10 @@ async function handler(req: Request): Promise<Response> {
 			}/${MAX_RETRIES}] Using key index ${keyIndex}. Target URL: ${targetUrl}`
 		);
 
-		const headersToForward = new Headers();
-		for (const [key, value] of req.headers) {
-			const lowerKey = key.toLowerCase();
-			if (
-				![
-					'host',
-					'authorization',
-					'x-goog-api-key',
-					'x-access-token',
-					'content-length',
-				].includes(lowerKey)
-			) {
-				headersToForward.set(key, value);
-			}
-		}
-		headersToForward.set('x-goog-api-key', apiKey);
+		const headersToForward = new Headers({
+			'Content-Type': req.headers.get('Content-Type') || 'application/json',
+			'x-goog-api-key': apiKey,
+		});
 
 		try {
 			const res = await fetch(targetUrl.toString(), {
