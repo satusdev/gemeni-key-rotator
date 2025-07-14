@@ -71,7 +71,7 @@ it locally.
     ##### cURL (Bash/Zsh)
 
     ```bash
-    curl -X POST "http://localhost:8000/v1beta/models/gemini-pro:generateContent" \
+    curl -X POST "http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent" \
          -H "Content-Type: application/json" \
          -d '{
                "contents": [{
@@ -85,7 +85,7 @@ it locally.
     ##### PowerShell
 
     ```powershell
-    Invoke-WebRequest -Uri "http://localhost:8000/v1beta/models/gemini-pro:generateContent" `
+    Invoke-WebRequest -Uri "http://localhost:8000/v1beta/models/gemini-2.5-pro:generateContent" `
       -Method POST `
       -Headers @{"Content-Type"="application/json"} `
       -Body '{"contents":[{"parts":[{"text": "Write a story about a magic backpack."}]}]}'
