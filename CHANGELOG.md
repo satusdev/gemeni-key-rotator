@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/satusdev/gemeni-key-rotator/compare/v1.2.0...v1.3.0) (2025-07-14)
+
+
+### Features
+
+* improve retry logic and update documentation ([f50da86](https://github.com/satusdev/gemeni-key-rotator/commit/f50da869b77bb4f8549b791ede8e2e5fe0920e4e))
+
 ## [1.2.0](https://github.com/nadbad/cline-key-rotator/compare/v1.1.0...v1.2.0) (2025-07-11)
 
 
